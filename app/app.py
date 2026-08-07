@@ -102,6 +102,14 @@ with st.sidebar:
     st.divider()
     st.caption("Busca BM25 local, sem custo. Código aberto no GitHub.")
 
+if not chave:
+    st.info(
+        "**Modo busca ativo.** A busca nos documentos funciona normalmente e mostra "
+        "os trechos que respondem à pergunta. Para ver a resposta escrita, cole na "
+        "barra lateral uma chave gratuita da OpenRouter, criada em "
+        "[openrouter.ai/keys](https://openrouter.ai/keys). Ela fica só na sua sessão."
+    )
+
 if "mensagens" not in st.session_state:
     st.session_state.mensagens = []
 
