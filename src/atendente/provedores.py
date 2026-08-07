@@ -17,6 +17,15 @@ OPENROUTER = "openrouter"
 MODELO_ANTHROPIC = "claude-opus-5"
 MODELO_OPENROUTER_PADRAO = "google/gemma-4-31b-it:free"
 
+# Fila de reserva: modelos gratuitos têm limite por minuto e às vezes ficam
+# indisponíveis. Se o primeiro recusar, a chamada tenta o seguinte, e a demo
+# continua respondendo em vez de mostrar erro para o visitante.
+MODELOS_RESERVA = (
+    MODELO_OPENROUTER_PADRAO,
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai/gpt-oss-20b:free",
+)
+
 URL_MODELOS = "https://openrouter.ai/api/v1/models"
 URL_CHAT = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -103,6 +112,22 @@ def chamar_openrouter(
         tokens_saida=uso.get("completion_tokens", 0),
         modelo=corpo.get("model", modelo),
     )
+
+
+def chamar_openrouter_com_reserva(
+    instrucoes: str,
+    mensagens: list[dict],
+    api_key: str,
+    modelos: tuple[str, ...] = MODELOS_RESERVA,
+) -> Saida:
+    """Tenta cada modelo da fila até um responder; propaga o último erro."""
+    ultimo_erro: Exception | None = None
+    for modelo in modelos:
+        try:
+            return chamar_openrouter(instrucoes, mensagens, api_key=api_key, modelo=modelo)
+        except RuntimeError as erro:
+            ultimo_erro = erro
+    raise ultimo_erro or RuntimeError("nenhum modelo disponível")
 
 
 def chamar_anthropic(

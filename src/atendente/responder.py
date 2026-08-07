@@ -12,6 +12,7 @@ from .provedores import (
     OPENROUTER,
     chamar_anthropic,
     chamar_openrouter,
+    chamar_openrouter_com_reserva,
 )
 
 INSTRUCOES = """Você é o atendente virtual da Lumina Café, uma loja de café por assinatura.
@@ -55,9 +56,10 @@ def responder(
     mensagens.append({"role": "user", "content": montar_mensagem(pergunta, resultados)})
 
     if provedor == OPENROUTER:
-        if not modelo:
-            raise ValueError("informe o modelo da OpenRouter")
-        saida = chamar_openrouter(INSTRUCOES, mensagens, api_key=api_key, modelo=modelo)
+        if modelo:
+            saida = chamar_openrouter(INSTRUCOES, mensagens, api_key=api_key, modelo=modelo)
+        else:  # sem modelo escolhido, percorre a fila de reserva
+            saida = chamar_openrouter_com_reserva(INSTRUCOES, mensagens, api_key=api_key)
     else:
         saida = chamar_anthropic(
             INSTRUCOES, mensagens, api_key=api_key, modelo=modelo or MODELO_ANTHROPIC

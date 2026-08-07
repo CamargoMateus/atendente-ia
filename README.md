@@ -29,7 +29,7 @@ A busca e o prompt são idênticos nos dois casos; muda apenas quem escreve a re
 | OpenRouter | catálogo com modelos gratuitos (sufixo `:free`) | zero, com limite de requisições | demonstração pública, protótipo, validação de ideia |
 | Anthropic | Claude | por token | produção, quando seguir a instrução de citar a fonte é crítico |
 
-A lista de modelos gratuitos é consultada ao vivo na API da OpenRouter, porque ela muda de mês para mês; fixar nomes no código deixaria o app quebrado depois. Nenhuma biblioteca extra é necessária: a chamada usa `urllib` da biblioteca padrão.
+Modelos gratuitos têm limite por minuto e às vezes ficam indisponíveis, então a chamada percorre uma fila de reserva: se o primeiro recusar, tenta o próximo, e a demo continua respondendo em vez de mostrar erro para o visitante. Nenhuma biblioteca extra é necessária: a chamada usa `urllib` da biblioteca padrão.
 
 Nada é treinado nem enviado para treinamento. Os documentos entram no pedido, o modelo lê e responde. Trocar de provedor não exige reprocessar nada.
 
@@ -52,7 +52,11 @@ pip install -r requirements.txt
 streamlit run app/app.py
 ```
 
-Sem chave de API o app roda em **modo busca**, mostrando quais trechos seriam enviados ao modelo e a relevância de cada um. Informando uma chave na barra lateral (ela fica só na sessão do navegador), ele gera a resposta final citada. A chave gratuita da OpenRouter sai em openrouter.ai/keys.
+A chave fica no servidor, nunca na interface: quem abre o app só conversa. Defina `OPENROUTER_API_KEY` como variável de ambiente (local) ou nos Secrets do Streamlit Cloud (publicado). A chave gratuita sai em openrouter.ai/keys.
+
+Sem chave o app continua útil: roda em **modo busca**, mostrando quais trechos responderiam à pergunta e a relevância de cada um. Só a redação final fica desligada.
+
+Se `ANTHROPIC_API_KEY` estiver definida e `OPENROUTER_API_KEY` não, o app usa Claude automaticamente.
 
 Para validar a busca depois de mexer nos documentos:
 

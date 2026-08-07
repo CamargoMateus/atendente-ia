@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -12,11 +13,7 @@ sys.path.insert(0, str(RAIZ / "src"))
 
 from atendente.busca import Indice  # noqa: E402
 from atendente.corpus import carregar_trechos, resumo_do_corpus  # noqa: E402
-from atendente.provedores import (  # noqa: E402
-    ANTHROPIC,
-    OPENROUTER,
-    listar_modelos_gratuitos,
-)
+from atendente.provedores import ANTHROPIC, OPENROUTER  # noqa: E402
 from atendente.responder import responder  # noqa: E402
 
 PERGUNTAS_EXEMPLO = [
@@ -37,17 +34,17 @@ def preparar_indice():
     return trechos, Indice(trechos)
 
 
-@st.cache_data(ttl=3600)
-def modelos_gratuitos():
-    return listar_modelos_gratuitos()
-
-
 def segredo(nome: str) -> str:
-    """st.secrets levanta exceção quando não há arquivo de secrets configurado."""
+    """Lê dos Secrets do Streamlit e, se não houver, da variável de ambiente.
+
+    st.secrets levanta exceção quando não existe arquivo de secrets, que é o
+    caso ao rodar localmente sem configuração.
+    """
     try:
-        return st.secrets.get(nome, "")
+        valor = st.secrets.get(nome, "")
     except Exception:
-        return ""
+        valor = ""
+    return valor or os.environ.get(nome, "")
 
 
 trechos, indice = preparar_indice()
@@ -61,53 +58,43 @@ st.markdown(
 )
 st.caption(f"Base carregada: {resumo_do_corpus(trechos)}")
 
+# A chave vive no servidor (Secrets do Streamlit ou variável de ambiente), nunca
+# na interface: o visitante abre o link e usa, sem configurar nada.
+chave_openrouter = segredo("OPENROUTER_API_KEY")
+chave_anthropic = segredo("ANTHROPIC_API_KEY")
+if chave_openrouter:
+    provedor, chave, modelo = OPENROUTER, chave_openrouter, None
+elif chave_anthropic:
+    provedor, chave, modelo = ANTHROPIC, chave_anthropic, None
+else:
+    provedor, chave, modelo = OPENROUTER, "", None
+
 with st.sidebar:
-    st.header("Configuração")
-    escolha = st.radio(
-        "Provedor do modelo",
-        ["OpenRouter (modelos gratuitos)", "Anthropic (Claude)"],
-        help="A busca nos documentos é a mesma nos dois casos. Muda só quem escreve a resposta.",
-    )
-    provedor = OPENROUTER if escolha.startswith("OpenRouter") else ANTHROPIC
-
-    if provedor == OPENROUTER:
-        modelo = st.selectbox("Modelo gratuito", modelos_gratuitos())
-        chave = st.text_input(
-            "Chave da OpenRouter",
-            type="password",
-            placeholder="sk-or-v1-...",
-            help="Crie em openrouter.ai/keys. A chave fica só na sua sessão do navegador.",
-        ) or segredo("OPENROUTER_API_KEY")
-        st.caption(
-            "Modelos gratuitos têm limite de requisições por minuto e por dia, "
-            "e seguem menos à risca a instrução de citar a fonte."
-        )
-    else:
-        modelo = None
-        chave = st.text_input(
-            "Chave da Anthropic",
-            type="password",
-            placeholder="sk-ant-...",
-            help="A chave fica só na sua sessão do navegador.",
-        ) or segredo("ANTHROPIC_API_KEY")
-
-    st.markdown(
-        "Sem chave o app roda em **modo busca**: mostra os trechos que seriam "
-        "enviados ao modelo, com a pontuação de relevância."
-    )
-    st.divider()
-    st.subheader("Documentos na base")
+    st.header("Documentos na base")
     for documento in sorted({t.documento for t in trechos}):
         st.markdown(f"- {documento}")
+    st.caption(
+        "Troque estes arquivos pelos documentos da sua empresa e o atendente passa "
+        "a responder sobre eles, sem nenhuma mudança no código."
+    )
     st.divider()
-    st.caption("Busca BM25 local, sem custo. Código aberto no GitHub.")
+    st.subheader("Como funciona")
+    st.markdown(
+        "1. A pergunta vira uma lista de palavras\n"
+        "2. Uma busca BM25 pontua as 42 seções dos documentos\n"
+        "3. As 5 mais relevantes vão para o modelo, junto da pergunta\n"
+        "4. O modelo responde citando os trechos, ou diz que não encontrou"
+    )
+    st.caption("Busca local, sem custo. Resposta por modelo gratuito da OpenRouter.")
+    st.divider()
+    st.caption("Código aberto: github.com/CamargoMateus/atendente-ia")
 
 if not chave:
     st.info(
-        "**Modo busca ativo.** A busca nos documentos funciona normalmente e mostra "
-        "os trechos que respondem à pergunta. Para ver a resposta escrita, cole na "
-        "barra lateral uma chave gratuita da OpenRouter, criada em "
-        "[openrouter.ai/keys](https://openrouter.ai/keys). Ela fica só na sua sessão."
+        "**Modo busca.** A busca nos documentos está funcionando e mostra os trechos "
+        "que respondem à pergunta, mas a redação final está desligada porque não há "
+        "chave configurada no servidor. Para ligar, defina `OPENROUTER_API_KEY` nos "
+        "Secrets do app."
     )
 
 if "mensagens" not in st.session_state:
