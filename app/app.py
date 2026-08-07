@@ -12,6 +12,11 @@ sys.path.insert(0, str(RAIZ / "src"))
 
 from atendente.busca import Indice  # noqa: E402
 from atendente.corpus import carregar_trechos, resumo_do_corpus  # noqa: E402
+from atendente.provedores import (  # noqa: E402
+    ANTHROPIC,
+    OPENROUTER,
+    listar_modelos_gratuitos,
+)
 from atendente.responder import responder  # noqa: E402
 
 PERGUNTAS_EXEMPLO = [
@@ -32,6 +37,19 @@ def preparar_indice():
     return trechos, Indice(trechos)
 
 
+@st.cache_data(ttl=3600)
+def modelos_gratuitos():
+    return listar_modelos_gratuitos()
+
+
+def segredo(nome: str) -> str:
+    """st.secrets levanta exceção quando não há arquivo de secrets configurado."""
+    try:
+        return st.secrets.get(nome, "")
+    except Exception:
+        return ""
+
+
 trechos, indice = preparar_indice()
 
 st.title("💬 Atendente de IA")
@@ -45,30 +63,44 @@ st.caption(f"Base carregada: {resumo_do_corpus(trechos)}")
 
 with st.sidebar:
     st.header("Configuração")
-    chave = st.text_input(
-        "Chave da API Anthropic",
-        type="password",
-        help="A chave fica só na sua sessão do navegador e não é gravada em lugar nenhum.",
-        placeholder="sk-ant-...",
+    escolha = st.radio(
+        "Provedor do modelo",
+        ["OpenRouter (modelos gratuitos)", "Anthropic (Claude)"],
+        help="A busca nos documentos é a mesma nos dois casos. Muda só quem escreve a resposta.",
     )
-    if not chave:
-        # st.secrets levanta exceção quando não existe arquivo de secrets,
-        # que é justamente o caso ao rodar localmente sem configuração.
-        try:
-            chave = st.secrets.get("ANTHROPIC_API_KEY", "")
-        except Exception:
-            chave = ""
+    provedor = OPENROUTER if escolha.startswith("OpenRouter") else ANTHROPIC
+
+    if provedor == OPENROUTER:
+        modelo = st.selectbox("Modelo gratuito", modelos_gratuitos())
+        chave = st.text_input(
+            "Chave da OpenRouter",
+            type="password",
+            placeholder="sk-or-v1-...",
+            help="Crie em openrouter.ai/keys. A chave fica só na sua sessão do navegador.",
+        ) or segredo("OPENROUTER_API_KEY")
+        st.caption(
+            "Modelos gratuitos têm limite de requisições por minuto e por dia, "
+            "e seguem menos à risca a instrução de citar a fonte."
+        )
+    else:
+        modelo = None
+        chave = st.text_input(
+            "Chave da Anthropic",
+            type="password",
+            placeholder="sk-ant-...",
+            help="A chave fica só na sua sessão do navegador.",
+        ) or segredo("ANTHROPIC_API_KEY")
+
     st.markdown(
         "Sem chave o app roda em **modo busca**: mostra os trechos que seriam "
-        "enviados ao modelo, com a pontuação de relevância. Com chave, gera a "
-        "resposta final citada."
+        "enviados ao modelo, com a pontuação de relevância."
     )
     st.divider()
     st.subheader("Documentos na base")
     for documento in sorted({t.documento for t in trechos}):
         st.markdown(f"- {documento}")
     st.divider()
-    st.caption("Busca BM25 local + geração com Claude. Código aberto no GitHub.")
+    st.caption("Busca BM25 local, sem custo. Código aberto no GitHub.")
 
 if "mensagens" not in st.session_state:
     st.session_state.mensagens = []
@@ -80,14 +112,19 @@ for i, exemplo in enumerate(PERGUNTAS_EXEMPLO):
     if colunas[i % 2].button(exemplo, key=f"ex{i}", width="stretch"):
         pergunta_clicada = exemplo
 
+
+def mostrar_trechos(detalhes: list[dict]) -> None:
+    for res in detalhes:
+        st.markdown(f"**{res['citacao']}** · relevância {res['score']:.1f}")
+        st.caption(res["texto"])
+
+
 for mensagem in st.session_state.mensagens:
     with st.chat_message(mensagem["papel"]):
         st.markdown(mensagem["texto"])
         if mensagem.get("trechos"):
             with st.expander("Trechos consultados"):
-                for res in mensagem["trechos"]:
-                    st.markdown(f"**{res['citacao']}** · relevância {res['score']:.1f}")
-                    st.caption(res["texto"])
+                mostrar_trechos(mensagem["trechos"])
 
 pergunta = st.chat_input("Escreva a dúvida do cliente...") or pergunta_clicada
 
@@ -112,33 +149,35 @@ if pergunta:
             st.session_state.mensagens.append({"papel": "assistant", "texto": texto})
         elif not chave:
             texto = (
-                "**Modo busca** (sem chave da API). Estes são os trechos que seriam "
+                "**Modo busca** (sem chave de API). Estes são os trechos que seriam "
                 "enviados ao modelo para compor a resposta:"
             )
             st.markdown(texto)
-            for res in detalhes:
-                st.markdown(f"**{res['citacao']}** · relevância {res['score']:.1f}")
-                st.caption(res["texto"])
+            mostrar_trechos(detalhes)
             st.session_state.mensagens.append(
                 {"papel": "assistant", "texto": texto, "trechos": detalhes}
             )
         else:
             with st.spinner("Consultando os documentos..."):
                 try:
-                    resposta = responder(pergunta, resultados, api_key=chave)
-                except Exception as erro:  # chave inválida, rede, limite de uso
+                    resposta = responder(
+                        pergunta,
+                        resultados,
+                        api_key=chave,
+                        provedor=provedor,
+                        modelo=modelo,
+                    )
+                except Exception as erro:  # chave inválida, limite de uso, rede
                     texto = f"Não consegui gerar a resposta: {erro}"
                     st.error(texto)
                     st.session_state.mensagens.append({"papel": "assistant", "texto": texto})
                 else:
                     st.markdown(resposta.texto)
                     with st.expander("Trechos consultados"):
-                        for res in detalhes:
-                            st.markdown(f"**{res['citacao']}** · relevância {res['score']:.1f}")
-                            st.caption(res["texto"])
+                        mostrar_trechos(detalhes)
                     st.caption(
-                        f"{resposta.tokens_entrada} tokens de entrada · "
-                        f"{resposta.tokens_saida} de saída"
+                        f"{resposta.modelo} · {resposta.tokens_entrada} tokens de "
+                        f"entrada · {resposta.tokens_saida} de saída"
                     )
                     st.session_state.mensagens.append(
                         {"papel": "assistant", "texto": resposta.texto, "trechos": detalhes}

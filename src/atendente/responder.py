@@ -1,15 +1,18 @@
-"""Gera a resposta do atendente com a API da Anthropic, presa aos documentos."""
+"""Monta o prompt e gera a resposta do atendente, presa aos documentos."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-import anthropic
-
 from .busca import Resultado
 from .corpus import formatar_para_prompt
-
-MODELO = "claude-opus-5"
+from .provedores import (
+    ANTHROPIC,
+    MODELO_ANTHROPIC,
+    OPENROUTER,
+    chamar_anthropic,
+    chamar_openrouter,
+)
 
 INSTRUCOES = """Você é o atendente virtual da Lumina Café, uma loja de café por assinatura.
 
@@ -28,51 +31,42 @@ class Resposta:
     citacoes: list[str]
     tokens_entrada: int
     tokens_saida: int
+    modelo: str
+
+
+def montar_mensagem(pergunta: str, resultados: list[Resultado]) -> str:
+    """Texto exato que vai ao modelo: os trechos recuperados e depois a pergunta."""
+    contexto = formatar_para_prompt([r.trecho for r in resultados])
+    return (
+        f"Trechos dos documentos da empresa:\n\n{contexto}\n\n"
+        f"Pergunta do cliente: {pergunta}"
+    )
 
 
 def responder(
     pergunta: str,
     resultados: list[Resultado],
     api_key: str,
+    provedor: str = ANTHROPIC,
+    modelo: str | None = None,
     historico: list[dict] | None = None,
 ) -> Resposta:
-    """Chama o modelo com os trechos recuperados e devolve a resposta citada."""
-    trechos = [r.trecho for r in resultados]
-    contexto = formatar_para_prompt(trechos)
-
     mensagens: list[dict] = list(historico or [])
-    mensagens.append(
-        {
-            "role": "user",
-            "content": (
-                f"Trechos dos documentos da empresa:\n\n{contexto}\n\n"
-                f"Pergunta do cliente: {pergunta}"
-            ),
-        }
-    )
+    mensagens.append({"role": "user", "content": montar_mensagem(pergunta, resultados)})
 
-    cliente = anthropic.Anthropic(api_key=api_key)
-    resposta = cliente.messages.create(
-        model=MODELO,
-        max_tokens=1500,
-        system=[{"type": "text", "text": INSTRUCOES, "cache_control": {"type": "ephemeral"}}],
-        output_config={"effort": "low"},
-        messages=mensagens,
-    )
-
-    if resposta.stop_reason == "refusal":
-        return Resposta(
-            texto="Não consigo responder essa pergunta. Encaminhe para o time humano.",
-            citacoes=[],
-            tokens_entrada=resposta.usage.input_tokens,
-            tokens_saida=resposta.usage.output_tokens,
+    if provedor == OPENROUTER:
+        if not modelo:
+            raise ValueError("informe o modelo da OpenRouter")
+        saida = chamar_openrouter(INSTRUCOES, mensagens, api_key=api_key, modelo=modelo)
+    else:
+        saida = chamar_anthropic(
+            INSTRUCOES, mensagens, api_key=api_key, modelo=modelo or MODELO_ANTHROPIC
         )
 
-    texto = "".join(b.text for b in resposta.content if b.type == "text")
-    citacoes = [t.citacao for t in trechos]
     return Resposta(
-        texto=texto,
-        citacoes=citacoes,
-        tokens_entrada=resposta.usage.input_tokens,
-        tokens_saida=resposta.usage.output_tokens,
+        texto=saida.texto,
+        citacoes=[r.trecho.citacao for r in resultados],
+        tokens_entrada=saida.tokens_entrada,
+        tokens_saida=saida.tokens_saida,
+        modelo=saida.modelo,
     )

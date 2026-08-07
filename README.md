@@ -16,9 +16,22 @@ Um modelo de linguagem sozinho inventa prazo de entrega e política de reembolso
 flowchart LR
     A[Documentos .md<br>da empresa] -->|seções e passagens| B[Índice BM25<br>local, sem custo]
     C[Pergunta do cliente] --> B
-    B -->|5 trechos mais relevantes| D[Claude<br>preso aos trechos]
+    B -->|5 trechos mais relevantes| D[Modelo de linguagem<br>preso aos trechos]
     D --> E[Resposta com citação<br>ou 'não encontrei']
 ```
+
+## Dois provedores, o mesmo núcleo
+
+A busca e o prompt são idênticos nos dois casos; muda apenas quem escreve a resposta final.
+
+| Provedor | Modelos | Custo | Quando usar |
+|---|---|---|---|
+| OpenRouter | catálogo com modelos gratuitos (sufixo `:free`) | zero, com limite de requisições | demonstração pública, protótipo, validação de ideia |
+| Anthropic | Claude | por token | produção, quando seguir a instrução de citar a fonte é crítico |
+
+A lista de modelos gratuitos é consultada ao vivo na API da OpenRouter, porque ela muda de mês para mês; fixar nomes no código deixaria o app quebrado depois. Nenhuma biblioteca extra é necessária: a chamada usa `urllib` da biblioteca padrão.
+
+Nada é treinado nem enviado para treinamento. Os documentos entram no pedido, o modelo lê e responde. Trocar de provedor não exige reprocessar nada.
 
 ## Decisões técnicas
 
@@ -39,12 +52,18 @@ pip install -r requirements.txt
 streamlit run app/app.py
 ```
 
-Sem chave de API o app roda em **modo busca**, mostrando quais trechos seriam enviados ao modelo e a relevância de cada um. Com uma chave da Anthropic informada na barra lateral (ela fica só na sessão do navegador), ele gera a resposta final citada.
+Sem chave de API o app roda em **modo busca**, mostrando quais trechos seriam enviados ao modelo e a relevância de cada um. Informando uma chave na barra lateral (ela fica só na sessão do navegador), ele gera a resposta final citada. A chave gratuita da OpenRouter sai em openrouter.ai/keys.
 
 Para validar a busca depois de mexer nos documentos:
 
 ```bash
 python tests/test_busca.py
+```
+
+Para auditar exatamente o que é enviado ao modelo, sem gastar chamada de API:
+
+```bash
+python scripts/mostrar_prompt.py "quanto tempo demora para chegar em Manaus"
 ```
 
 ## Estrutura
@@ -54,9 +73,11 @@ dados/                  documentos da empresa em Markdown
 src/atendente/
   corpus.py             leitura, divisão em seções e passagens
   busca.py              normalização, stemming e ranking BM25
-  responder.py          prompt e chamada da API com as regras anti-invenção
+  responder.py          montagem do prompt e regras anti-invenção
+  provedores.py         chamada à OpenRouter e à Anthropic
 app/app.py              interface de chat
 tests/test_busca.py     recall@5 sobre perguntas reais de cliente
+scripts/mostrar_prompt.py  imprime o prompt exato de uma pergunta
 ```
 
 ## Do protótipo ao WhatsApp
